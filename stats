@@ -1,0 +1,172 @@
+import requests
+import json
+import time
+
+api_key = "RGAPI-f2e70f8f-a7f5-4185-83f2-d349475adf0a"
+
+
+def get_summoner_id(summoner_name: str) -> str:
+    url = "https://na1.api.riotgames.com/lol/summoner/v4/summoners/by-name/" + summoner_name + \
+          "?api_key=" + api_key
+    response = requests.get(url)
+    return response.json()['accountId']
+
+
+def get_champion_by_id(champ_id: int) -> str:
+    url = "http://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champions/" \
+          + str(champ_id) + ".json"
+    response = requests.get(url)
+    return response.json()
+
+
+def compile_champ_id_dictionary() -> dict:
+    d = {}
+    for champ_id in range(600):
+        try:
+            url = "http://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champions/" \
+                  + str(champ_id) + ".json"
+            response = requests.get(url)
+            name = response.json()['name'].lower()
+            d[name] = response.json()['id']
+        except:
+            pass
+    return d
+
+
+def get_champ_id_by_name(name: str) -> int:
+    f = open("champ_name_to_id.json", "r")
+    d = json.load(f)
+    return d[name.lower()]
+
+
+def get_summoner_mastery(summoner_id: str) -> str:
+    url = "https://na1.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-summoner/" + summoner_id + \
+          "?api_key=" + api_key
+    response = requests.get(url)
+    return response.json()
+
+
+def get_x_highest_played_champion(x: int) -> str:
+    result1 = get_summoner_id("Mellow1000")
+    ID = result1['id']
+    result2 = get_summoner_mastery(ID)
+    champion_id = result2[x-1]['championId']
+    result3 = get_champion_by_id(champion_id)
+    return result3['name']
+
+
+def get_game_stats(game_id: int) -> dict:
+    url = "https://na1.api.riotgames.com/lol/match/v4/matches/" + str(game_id)\
+          + "?api_key=" + api_key
+    response = requests.get(url)
+    return response.json()
+
+
+def get_participant_id(game_dict: dict, name: str) -> int:
+    for participants in game_dict['participantIdentities']:
+        if participants['player']['summonerName'].lower() == name.lower():
+            return participants['participantId']
+
+
+def get_kda(stat_dict: dict, p_id: int) -> tuple:
+    kills = stat_dict['participants'][p_id-1]['stats']['kills']
+    deaths = stat_dict['participants'][p_id-1]['stats']['deaths']
+    assists = stat_dict['participants'][p_id-1]['stats']['assists']
+    return kills, deaths, assists
+
+
+def get_total_games_played(account_id: str, champ_id: int) -> dict:
+    _kills = 0
+    _deaths = 0
+    _assists = 0
+    _wins = 0
+    _losses = 0
+    champ_extender = "?champion=" + str(champ_id) + "&"
+    total = {'matches': []}
+    for begin_index in range(0, 1000, 100):
+        url = "https://na1.api.riotgames.com/lol/match/v4/matchlists/by-account/" + account_id + \
+              champ_extender + "queue=400&queue=420&queue=430&queue=440&beginIndex=" + str(begin_index)\
+              + "&api_key=" + api_key
+        response = requests.get(url)
+        total['matches'] += response.json()['matches']
+    indices = []
+    for i in range(len(total['matches'])):
+        url = "https://na1.api.riotgames.com/lol/match/v4/matches/" + str(total['matches'][i]['gameId']) \
+              + "?api_key=" + api_key
+        response = requests.get(url)
+        if response.json()['gameDuration'] <= 270:
+            indices.append(i)
+        else:
+            for participants in response.json()['participantIdentities']:
+                if participants['player']['accountId'] == account_id:
+                    p_id = participants['participantId']
+                    _kills += response.json()['participants'][p_id - 1]['stats']['kills']
+                    _deaths += response.json()['participants'][p_id - 1]['stats']['deaths']
+                    _assists += response.json()['participants'][p_id - 1]['stats']['assists']
+                    if response.json()['participants'][p_id - 1]['stats']['win']:
+                        _wins += 1
+                    else:
+                        _losses += 1
+        if i % 90 == 0:
+            time.sleep(120)
+    indices.sort(reverse=True)
+    for index in indices:
+        del total['matches'][index]
+    return total, _kills, _deaths, _assists, _wins, _losses
+
+
+def get_games_played_per_role(role: str) -> int:
+    result1 = get_summoner_id("HER4KLES")
+    ID = result1['accountId']
+    result2 = get_total_games_played(ID)
+    amount = 0
+    for games in result2['matches']:
+        if games['lane'] == role.upper():
+            amount += 1
+    return amount
+
+
+def get_games_played_per_champion(champion: str) -> int:
+    result1 = get_summoner_id("HER4KLES")
+    ID = result1['accountId']
+    champ_id = get_champ_id_by_name(champion)
+    result2 = get_total_games_played(ID, champ_id)
+    return result2['matches']
+
+
+def get_total_kda_per_champion(lst: list, summoner: str) -> tuple:
+    _kills = 0
+    _deaths = 0
+    _assists = 0
+    for i in range(len(lst)):
+        di = get_game_stats(lst[i]['gameId'])
+        p_id = get_participant_id(di, summoner)
+        print(p_id)
+        k, d, a = get_kda(di, p_id)
+        _kills += k
+        _deaths += d
+        _assists += a
+        if i % 100 == 0:
+            time.sleep(120)
+    return _kills, _deaths, _assists
+
+
+if __name__ == "__main__":
+    s_name = 'Cartharsis'
+    champ = "Nasus"
+    s_id = get_summoner_id(s_name)
+    champ_id = get_champ_id_by_name(champ)
+    data, kills, deaths, assists, wins, losses = get_total_games_played(s_id, champ_id)
+    print(str(s_name) + " On " + str(champ) + ":")
+    print("Total Games Played: " + str(len(data['matches'])))
+    print("Wins: " + str(wins))
+    print("Losses: " + str(losses))
+    if losses == 0:
+        losses = 1
+    print("Total W/R: " + str(round((wins/(wins+losses))*100, 2))+"%")
+    print("Kills: " + str(kills))
+    print("Deaths: " + str(deaths))
+    if deaths == 0:
+        deaths = 1
+    print("Assists: " + str(assists))
+    print("Total KDA: " + str(round(((kills+assists)/deaths), 2)))
